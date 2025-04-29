@@ -18,18 +18,18 @@
 # MAGIC - Use Pandas UDFs (user-defined functions) to take your single-node data science code, and distribute it across multiple nodes
 # COMMAND ----------
 
-# Note: dbutils is automatically available in Databricks notebooks
-# Create widgets for catalog and database names
-dbutils.widgets.text("catalog_name", "supply_chain", "Catalog Name")
-dbutils.widgets.text("db_name", "supply_chain_db", "Database Name")
+# Import get_config from util module
+from _resources.util import get_config
 
-# Get values from widgets
-catalog_name = dbutils.widgets.get("catalog_name")
-db_name = dbutils.widgets.get("db_name")
+# Get catalog and database names from config
+try:
+    catalog_name, db_name = get_config()
+    print(f"Using catalog: {catalog_name}")
+    print(f"Using database: {db_name}")
+except Exception as e:
+    print(e)
+    raise
 
-# Display the values being used
-print(f"Using catalog: {catalog_name}")
-print(f"Using database: {db_name}")
 # COMMAND ----------
 
 # MAGIC %run ./_resources/00-setup $reset_all_data=false $catalogName=$catalog_name $dbName=$db_name

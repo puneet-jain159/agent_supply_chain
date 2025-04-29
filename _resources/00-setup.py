@@ -13,7 +13,6 @@ dbutils.widgets.text("db_name", "hackathon_master", "Database Name")
 import os
 import re 
 import mlflow
-db_prefix = "mfg_supply_chain_optimization"
 
 # COMMAND ----------
 

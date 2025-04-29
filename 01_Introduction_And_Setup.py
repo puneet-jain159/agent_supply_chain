@@ -39,9 +39,12 @@
 # MAGIC
 # MAGIC The catalog and database will be created automatically if they do not exist. The data generator script will create the necessary tables and populate them with sample data.
 
+
 # COMMAND ----------
 
-# Note: dbutils is automatically available in Databricks notebooks
+from _resources.util import save_config
+
+# COMMAND ----------
 # Create widgets for catalog and database names
 dbutils.widgets.text("catalog_name", "supply_chain", "Catalog Name")
 dbutils.widgets.text("db_name", "supply_chain_db", "Database Name")
@@ -50,12 +53,15 @@ dbutils.widgets.text("db_name", "supply_chain_db", "Database Name")
 catalog_name = dbutils.widgets.get("catalog_name")
 db_name = dbutils.widgets.get("db_name")
 
+# Save config to JSON file for use in subsequent notebooks
+save_config(catalog_name, db_name)
+
 # Display the values being used
 print(f"Using catalog: {catalog_name}")
 print(f"Using database: {db_name}")
 
 # COMMAND ----------
-# Create catalog and schema
+# Create catalog and schema if they don't exist
 spark.sql(f"CREATE CATALOG IF NOT EXISTS {catalog_name}")
 spark.sql(f"CREATE SCHEMA IF NOT EXISTS {db_name}")
 
