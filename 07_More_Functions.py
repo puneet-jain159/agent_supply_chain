@@ -1,4 +1,10 @@
 # Databricks notebook source
+# Install the vector search SDK
+%pip install databricks-sdk
+dbutils.library.restartPython()
+
+# COMMAND ----------
+
 # Create widgets for catalog and database names
 dbutils.widgets.text("catalog_name", "supply_chain", "Catalog Name")
 dbutils.widgets.text("db_name", "supply_chain_db", "Database Name")
@@ -34,225 +40,212 @@ db_name = dbutils.widgets.get("db_name")
 # MAGIC     import time
 # MAGIC     from dataclasses import dataclass
 # MAGIC     from datetime import datetime
-# MAGIC     from typing import Optional
-# MAGIC     
+# MAGIC     from typing import Optional, Union
 # MAGIC     import pandas as pd
 # MAGIC     import requests
-# MAGIC     
-# MAGIC     
+# MAGIC
+# MAGIC
+# MAGIC     MAX_ITERATIONS = 50
+# MAGIC
 # MAGIC     @dataclass
-# MAGIC     class GenieResult:
-# MAGIC         space_id: str
-# MAGIC         conversation_id: str
-# MAGIC         question: str
-# MAGIC         content: Optional[str]
-# MAGIC         sql_query: Optional[str] = None
-# MAGIC         sql_query_description: Optional[str] = None
-# MAGIC         sql_query_result: Optional[pd.DataFrame] = None
-# MAGIC         error: Optional[str] = None
-# MAGIC     
-# MAGIC         def to_json_results(self):
-# MAGIC             result = {
-# MAGIC                 "space_id": self.space_id,
-# MAGIC                 "conversation_id": self.conversation_id,
-# MAGIC                 "question": self.question,
-# MAGIC                 "content": self.content,
-# MAGIC                 "sql_query": self.sql_query,
-# MAGIC                 "sql_query_description": self.sql_query_description,
-# MAGIC                 "sql_query_result": self.sql_query_result.to_dict(
-# MAGIC                     orient="records") if self.sql_query_result is not None else None,
-# MAGIC                 "error": self.error,
-# MAGIC             }
-# MAGIC             jsonified_results = json.dumps(result)
-# MAGIC             return f"Genie Results are: {jsonified_results}"
-# MAGIC     
-# MAGIC         def to_string_results(self):
-# MAGIC             results_string = self.sql_query_result.to_dict(orient="records") if self.sql_query_result is not None else None
-# MAGIC             return ("Genie Results are: \n"
-# MAGIC                     f"Space ID: {self.space_id}\n"
-# MAGIC                     f"Conversation ID: {self.conversation_id}\n"
-# MAGIC                     f"Question That Was Asked: {self.question}\n"
-# MAGIC                     f"Content: {self.content}\n"
-# MAGIC                     f"SQL Query: {self.sql_query}\n"
-# MAGIC                     f"SQL Query Description: {self.sql_query_description}\n"
-# MAGIC                     f"SQL Query Result: {results_string}\n"
-# MAGIC                     f"Error: {self.error}")
-# MAGIC     
-# MAGIC     class GenieClient:
-# MAGIC     
-# MAGIC         def __init__(self, *,
-# MAGIC                      host: Optional[str] = None,
-# MAGIC                      token: Optional[str] = None,
-# MAGIC                      api_prefix: str = "/api/2.0/genie/spaces"):
+# MAGIC     class GenieResponse:
+# MAGIC         result: Union[str, pd.DataFrame]
+# MAGIC         query: Optional[str] = ""
+# MAGIC         description: Optional[str] = ""
+# MAGIC         
+# MAGIC         def to_string(self):
+# MAGIC             if isinstance(self.result, pd.DataFrame):
+# MAGIC                 result_dict = self.result.to_dict(orient="records")
+# MAGIC                 result_str = json.dumps(result_dict, indent=2)
+# MAGIC             else:
+# MAGIC                 result_str = str(self.result)
+# MAGIC             
+# MAGIC             return (f"Result: {result_str}\n"
+# MAGIC                     f"Query: {self.query}\n"
+# MAGIC                     f"Description: {self.description}")
+# MAGIC
+# MAGIC     def _parse_query_result(resp) -> Union[str, pd.DataFrame]:
+# MAGIC         output = resp["result"]
+# MAGIC         if not output:
+# MAGIC             return "EMPTY"
+# MAGIC
+# MAGIC         columns = resp["manifest"]["schema"]["columns"]
+# MAGIC         header = [str(col["name"]) for col in columns]
+# MAGIC         rows = []
+# MAGIC
+# MAGIC         for item in output["data_array"]:
+# MAGIC             row = []
+# MAGIC             for column, value in zip(columns, item):
+# MAGIC                 type_name = column["type_name"]
+# MAGIC                 if value is None:
+# MAGIC                     row.append(None)
+# MAGIC                     continue
+# MAGIC
+# MAGIC                 if type_name in ["INT", "LONG", "SHORT", "BYTE"]:
+# MAGIC                     row.append(int(value))
+# MAGIC                 elif type_name in ["FLOAT", "DOUBLE", "DECIMAL"]:
+# MAGIC                     row.append(float(value))
+# MAGIC                 elif type_name == "BOOLEAN":
+# MAGIC                     row.append(value.lower() == "true")
+# MAGIC                 elif type_name == "DATE" or type_name == "TIMESTAMP":
+# MAGIC                     row.append(datetime.strptime(value[:10], "%Y-%m-%d").date())
+# MAGIC                 elif type_name == "BINARY":
+# MAGIC                     row.append(bytes(value, "utf-8"))
+# MAGIC                 else:
+# MAGIC                     row.append(value)
+# MAGIC
+# MAGIC             rows.append(row)
+# MAGIC
+# MAGIC         return pd.DataFrame(rows, columns=header)
+# MAGIC
+# MAGIC     class Genie:
+# MAGIC         def __init__(self, space_id, host=None, token=None):
+# MAGIC             self.space_id = space_id
 # MAGIC             self.host = host or os.environ.get("DATABRICKS_HOST")
 # MAGIC             self.token = token or os.environ.get("DATABRICKS_TOKEN")
+# MAGIC             
 # MAGIC             assert self.host is not None, "DATABRICKS_HOST is not set"
 # MAGIC             assert self.token is not None, "DATABRICKS_TOKEN is not set"
-# MAGIC             self._workspace_client = requests.Session()
-# MAGIC             self._workspace_client.headers.update({"Authorization": f"Bearer {self.token}"})
-# MAGIC             self._workspace_client.headers.update({"Content-Type": "application/json"})
-# MAGIC             self.api_prefix = api_prefix
-# MAGIC             self.max_retries = 300
-# MAGIC             self.retry_delay = 1
-# MAGIC             self.new_line = "\r\n"
-# MAGIC     
+# MAGIC             
+# MAGIC             self.session = requests.Session()
+# MAGIC             self.session.headers.update({
+# MAGIC                 "Authorization": f"Bearer {self.token}",
+# MAGIC                 "Accept": "application/json",
+# MAGIC                 "Content-Type": "application/json"
+# MAGIC             })
+# MAGIC             self.api_prefix = "/api/2.0/genie/spaces"
+# MAGIC
 # MAGIC         def _make_url(self, path):
 # MAGIC             return f"{self.host.rstrip('/')}/{path.lstrip('/')}"
-# MAGIC     
-# MAGIC         def start(self, space_id: str, start_suffix: str = "") -> str:
-# MAGIC             path = self._make_url(f"{self.api_prefix}/{space_id}/start-conversation")
-# MAGIC             resp = self._workspace_client.post(
+# MAGIC
+# MAGIC         def start_conversation(self, content):
+# MAGIC             path = self._make_url(f"{self.api_prefix}/{self.space_id}/start-conversation")
+# MAGIC             resp = self.session.post(
 # MAGIC                 url=path,
-# MAGIC                 headers={"Content-Type": "application/json"},
-# MAGIC                 json={"content": "starting conversation" if not start_suffix else f"starting conversation {start_suffix}"},
+# MAGIC                 json={"content": content}
 # MAGIC             )
-# MAGIC             resp = resp.json()
-# MAGIC             print(resp)
-# MAGIC             return resp["conversation_id"]
-# MAGIC     
-# MAGIC         def ask(self, space_id: str, conversation_id: str, message: str) -> GenieResult:
-# MAGIC             path = self._make_url(f"{self.api_prefix}/{space_id}/conversations/{conversation_id}/messages")
-# MAGIC             # TODO: cleanup into a separate state machine
-# MAGIC             resp_raw = self._workspace_client.post(
+# MAGIC             return resp.json()
+# MAGIC
+# MAGIC         def create_message(self, conversation_id, content):
+# MAGIC             path = self._make_url(f"{self.api_prefix}/{self.space_id}/conversations/{conversation_id}/messages")
+# MAGIC             resp = self.session.post(
 # MAGIC                 url=path,
-# MAGIC                 headers={"Content-Type": "application/json"},
-# MAGIC                 json={"content": message},
+# MAGIC                 json={"content": content}
 # MAGIC             )
-# MAGIC             resp = resp_raw.json()
-# MAGIC             message_id = resp.get("message_id", resp.get("id"))
-# MAGIC             if message_id is None:
-# MAGIC                 print(resp, resp_raw.url, resp_raw.status_code, resp_raw.headers)
-# MAGIC                 return GenieResult(content=None, error="Failed to get message_id")
-# MAGIC     
-# MAGIC             attempt = 0
-# MAGIC             query = None
-# MAGIC             query_description = None
-# MAGIC             content = None
-# MAGIC     
-# MAGIC             while attempt < self.max_retries:
-# MAGIC                 resp_raw = self._workspace_client.get(
-# MAGIC                     self._make_url(f"{self.api_prefix}/{space_id}/conversations/{conversation_id}/messages/{message_id}"),
-# MAGIC                     headers={"Content-Type": "application/json"},
-# MAGIC                 )
-# MAGIC                 resp = resp_raw.json()
-# MAGIC                 status = resp["status"]
-# MAGIC                 if status == "COMPLETED":
-# MAGIC                     try:
-# MAGIC     
-# MAGIC                         query = resp["attachments"][0]["query"]["query"]
-# MAGIC                         query_description = resp["attachments"][0]["query"].get("description", None)
-# MAGIC                         content = resp["attachments"][0].get("text", {}).get("content", None)
-# MAGIC                     except Exception as e:
-# MAGIC                         return GenieResult(
-# MAGIC                             space_id=space_id,
-# MAGIC                             conversation_id=conversation_id,
-# MAGIC                             question=message,
-# MAGIC                             content=resp["attachments"][0].get("text", {}).get("content", None)
+# MAGIC             return resp.json()
+# MAGIC
+# MAGIC         def poll_for_result(self, conversation_id, message_id):
+# MAGIC             def poll_query_results(attachment_id, query_str, description):
+# MAGIC                 iteration_count = 0
+# MAGIC                 while iteration_count < MAX_ITERATIONS:
+# MAGIC                     iteration_count += 1
+# MAGIC                     path = self._make_url(
+# MAGIC                         f"{self.api_prefix}/{self.space_id}/conversations/{conversation_id}/messages/{message_id}/attachments/{attachment_id}/query-result"
+# MAGIC                     )
+# MAGIC                     resp = self.session.get(url=path).json()["statement_response"]
+# MAGIC                     
+# MAGIC                     state = resp["status"]["state"]
+# MAGIC                     if state == "SUCCEEDED":
+# MAGIC                         result = _parse_query_result(resp)
+# MAGIC                         return GenieResponse(result, query_str, description)
+# MAGIC                     elif state in ["RUNNING", "PENDING"]:
+# MAGIC                         print(f"Waiting for query result... (iteration {iteration_count})")
+# MAGIC                         time.sleep(5)
+# MAGIC                     else:
+# MAGIC                         return GenieResponse(
+# MAGIC                             f"No query result: {resp['state']}", query_str, description
 # MAGIC                         )
-# MAGIC                     break
-# MAGIC     
-# MAGIC                 elif status == "EXECUTING_QUERY":
-# MAGIC                     self._workspace_client.get(
-# MAGIC                         self._make_url(
-# MAGIC                             f"{self.api_prefix}/{space_id}/conversations/{conversation_id}/messages/{message_id}/query-result"),
-# MAGIC                         headers={"Content-Type": "application/json"},
-# MAGIC                     )
-# MAGIC                 elif status in ["FAILED", "CANCELED"]:
-# MAGIC                     return GenieResult(
-# MAGIC                         space_id=space_id,
-# MAGIC                         conversation_id=conversation_id,
-# MAGIC                         question=message,
-# MAGIC                         content=None,
-# MAGIC                         error=f"Query failed with status {status}"
-# MAGIC                     )
-# MAGIC                 elif status != "COMPLETED" and attempt < self.max_retries - 1:
-# MAGIC                     time.sleep(self.retry_delay)
-# MAGIC                 else:
-# MAGIC                     return GenieResult(
-# MAGIC                         space_id=space_id,
-# MAGIC                         conversation_id=conversation_id,
-# MAGIC                         question=message,
-# MAGIC                         content=None,
-# MAGIC                         error=f"Query failed or still running after {self.max_retries * self.retry_delay} seconds"
-# MAGIC                     )
-# MAGIC                 attempt += 1
-# MAGIC             resp = self._workspace_client.get(
-# MAGIC                 self._make_url(
-# MAGIC                     f"{self.api_prefix}/{space_id}/conversations/{conversation_id}/messages/{message_id}/query-result"),
-# MAGIC                 headers={"Content-Type": "application/json"},
-# MAGIC             )
-# MAGIC             resp = resp.json()
-# MAGIC             columns = resp["statement_response"]["manifest"]["schema"]["columns"]
-# MAGIC             header = [str(col["name"]) for col in columns]
-# MAGIC             rows = []
-# MAGIC             output = resp["statement_response"]["result"]
-# MAGIC             if not output:
-# MAGIC                 return GenieResult(
-# MAGIC                     space_id=space_id,
-# MAGIC                     conversation_id=conversation_id,
-# MAGIC                     question=message,
-# MAGIC                     content=content,
-# MAGIC                     sql_query=query,
-# MAGIC                     sql_query_description=query_description,
-# MAGIC                     sql_query_result=pd.DataFrame([], columns=header),
+# MAGIC                 return GenieResponse(
+# MAGIC                     f"Genie query for result timed out after {MAX_ITERATIONS} iterations of 5 seconds",
+# MAGIC                     query_str,
+# MAGIC                     description,
 # MAGIC                 )
-# MAGIC             for item in resp["statement_response"]["result"]["data_typed_array"]:
-# MAGIC                 row = []
-# MAGIC                 for column, value in zip(columns, item["values"]):
-# MAGIC                     type_name = column["type_name"]
-# MAGIC                     str_value = value.get("str", None)
-# MAGIC                     if str_value is None:
-# MAGIC                         row.append(None)
-# MAGIC                         continue
-# MAGIC                     match type_name:
-# MAGIC                         case "INT" | "LONG" | "SHORT" | "BYTE":
-# MAGIC                             row.append(int(str_value))
-# MAGIC                         case "FLOAT" | "DOUBLE" | "DECIMAL":
-# MAGIC                             row.append(float(str_value))
-# MAGIC                         case "BOOLEAN":
-# MAGIC                             row.append(str_value.lower() == "true")
-# MAGIC                         case "DATE":
-# MAGIC                             row.append(datetime.strptime(str_value, "%Y-%m-%d").date())
-# MAGIC                         case "TIMESTAMP":
-# MAGIC                             row.append(datetime.strptime(str_value, "%Y-%m-%d %H:%M:%S"))
-# MAGIC                         case "BINARY":
-# MAGIC                             row.append(bytes(str_value, "utf-8"))
-# MAGIC                         case _:
-# MAGIC                             row.append(str_value)
-# MAGIC                 rows.append(row)
-# MAGIC     
-# MAGIC             query_result = pd.DataFrame(rows, columns=header)
-# MAGIC             return GenieResult(
-# MAGIC                 space_id=space_id,
-# MAGIC                 conversation_id=conversation_id,
-# MAGIC                 question=message,
-# MAGIC                 content=content,
-# MAGIC                 sql_query=query,
-# MAGIC                 sql_query_description=query_description,
-# MAGIC                 sql_query_result=query_result,
-# MAGIC             )
-# MAGIC     
-# MAGIC     
-# MAGIC     assert databricks_host is not None, "host is not set"
-# MAGIC     assert databricks_token is not None, "token is not set"
+# MAGIC
+# MAGIC             def poll_result():
+# MAGIC                 iteration_count = 0
+# MAGIC                 while iteration_count < MAX_ITERATIONS:
+# MAGIC                     iteration_count += 1
+# MAGIC                     path = self._make_url(
+# MAGIC                         f"{self.api_prefix}/{self.space_id}/conversations/{conversation_id}/messages/{message_id}"
+# MAGIC                     )
+# MAGIC                     resp = self.session.get(url=path).json()
+# MAGIC                     
+# MAGIC                     if resp["status"] == "COMPLETED":
+# MAGIC                         attachment = next((r for r in resp["attachments"] if "query" in r), None)
+# MAGIC                         if attachment:
+# MAGIC                             query_obj = attachment["query"]
+# MAGIC                             description = query_obj.get("description", "")
+# MAGIC                             query_str = query_obj.get("query", "")
+# MAGIC                             attachment_id = attachment["attachment_id"]
+# MAGIC                             return poll_query_results(attachment_id, query_str, description)
+# MAGIC                         if resp["status"] == "COMPLETED":
+# MAGIC                             text_content = next(r for r in resp["attachments"] if "text" in r)["text"][
+# MAGIC                                 "content"
+# MAGIC                             ]
+# MAGIC                             return GenieResponse(result=text_content)
+# MAGIC                     elif resp["status"] in {"CANCELLED", "QUERY_RESULT_EXPIRED"}:
+# MAGIC                         return GenieResponse(result=f"Genie query {resp['status'].lower()}.")
+# MAGIC                     elif resp["status"] == "FAILED":
+# MAGIC                         return GenieResponse(
+# MAGIC                             result=f"Genie query failed with error: {resp.get('error', 'Unknown error')}"
+# MAGIC                         )
+# MAGIC                     # includes EXECUTING_QUERY, Genie can retry after this status
+# MAGIC                     else:
+# MAGIC                         print(f"Waiting... Status: {resp['status']} (iteration {iteration_count})")
+# MAGIC                         time.sleep(5)
+# MAGIC                 return GenieResponse(
+# MAGIC                     f"Genie query timed out after {MAX_ITERATIONS} iterations of 5 seconds"
+# MAGIC                 )
+# MAGIC
+# MAGIC             return poll_result()
+# MAGIC
+# MAGIC         def ask_question(self, question):
+# MAGIC             resp = self.start_conversation(question)
+# MAGIC             return self.poll_for_result(resp["conversation_id"], resp["message_id"])
+# MAGIC             
+# MAGIC         def ask_with_context(self, question, contextual_history="No context history"):
+# MAGIC             formatted_message = f"""Use the contextual history to answer the question. The history may or may not help you. Use it if you find it relevant.
+# MAGIC             Contextual History: {contextual_history}
+# MAGIC             Question to answer: {question}"""
+# MAGIC             resp = self.start_conversation(formatted_message)
+# MAGIC             return self.poll_for_result(resp["conversation_id"], resp["message_id"])
+# MAGIC
 # MAGIC     assert space_id is not None, "space_id is not set"
 # MAGIC     assert question is not None, "question is not set"
 # MAGIC     assert contextual_history is not None, "contextual_history is not set"
-# MAGIC     client = GenieClient(host=databricks_host, token=databricks_token)
-# MAGIC     conversation_id = client.start(space_id)
-# MAGIC     formatted_message = f"""Use the contextual history to answer the question. The history may or may not help you. Use it if you find it relevant.
-# MAGIC     
-# MAGIC     Contextual History: {contextual_history}
-# MAGIC     
-# MAGIC     Question to answer: {question}
-# MAGIC     """
-# MAGIC     
-# MAGIC     result = client.ask(space_id, conversation_id, formatted_message)
-# MAGIC     
-# MAGIC     return result.to_string_results()
+# MAGIC
+# MAGIC     # Initialize client and run query
+# MAGIC     genie = Genie(space_id, databricks_host, databricks_token)
+# MAGIC     result = genie.ask_with_context(question, contextual_history)
+# MAGIC
+# MAGIC     return result.to_string()
 # MAGIC
 # MAGIC $$;
 # MAGIC
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Create a Secret to add a PAT Token to the UC Function
+
+# COMMAND ----------
+
+import time
+
+from databricks.sdk import WorkspaceClient
+
+w = WorkspaceClient()
+
+key_name = f"pat_token"
+
+scope_name = f"supply_chain"
+
+# w.secrets.create_scope(scope=scope_name)
+# w.secrets.put_secret(scope=scope_name, key=key_name, string_value=f"<add your secret here>")
+
+# cleanup
+# w.secrets.delete_secret(scope=scope_name, key=key_name)
+# w.secrets.delete_scope(scope=scope_name)
 
 # COMMAND ----------
 
@@ -264,15 +257,11 @@ db_name = dbutils.widgets.get("db_name")
 # MAGIC COMMENT 'This Agent interacts with the Genie space API to provide answers to questions about the pharma supply chain dataset.'  
 # MAGIC RETURN SELECT _genie_query(
 # MAGIC   "https://dbc-023ece0a-5678.cloud.databricks.com/",
-# MAGIC   "<Enter the PAT Token>",
-# MAGIC   "<Enter the Genie Rooms>",
+# MAGIC   secret("supply_chain", "pat_token"),
+# MAGIC   "<Enter Genie Room>",
 # MAGIC   question, -- retrieved from function
 # MAGIC   contextual_history -- retrieved from function
 # MAGIC );
-
-# COMMAND ----------
-
-# dbutils.secrets.get(scope="lr", key="supply-chain")
 
 # COMMAND ----------
 
