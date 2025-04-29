@@ -1,8 +1,17 @@
 # Databricks notebook source
+# Install the vector search SDK
+%pip install databricks-vectorsearch
+dbutils.library.restartPython()
+
+# COMMAND ----------
 
 # Create widgets for catalog and database names
 dbutils.widgets.text("catalog_name", "supply_chain", "Catalog Name")
 dbutils.widgets.text("db_name", "supply_chain_db", "Database Name")
+
+# COMMAND ----------
+
+
 
 # Get values from widgets
 catalog_name = dbutils.widgets.get("catalog_name")
@@ -12,12 +21,6 @@ db_name = dbutils.widgets.get("db_name")
 # COMMAND ----------
 
 # MAGIC %run ./_resources/00-setup $reset_all_data=false $catalogName=$catalog_name $dbName=$db_name
-
-# COMMAND ----------
-
-# Install the vector search SDK
-# MAGIC %pip install databricks-vectorsearch
-dbutils.library.restartPython()
 
 # COMMAND ----------
 
@@ -125,6 +128,7 @@ def get_or_create_endpoint(endpoint_name):
 # Get or create the vector search endpoint
 endpoint_name = "shared-endpoint-0"
 current_endpoint_name = get_or_create_endpoint(endpoint_name)
+
 # COMMAND ----------
 
 # Create a Delta Sync Index with embeddings computed by Databricks
@@ -145,13 +149,13 @@ def create_vector_search_index(name,source_table_fullname):
         try:
             existing_index = vs_client.get_index(
                 endpoint_name=current_endpoint_name,
-                index_name=index_name
+                index_name=name
             )
-            print(f"Index {index_name} already exists")
+            print(f"Index {name} already exists")
             return existing_index
         except:
             # Create the index
-            print(f"Creating vector search index: {index_name}")
+            print(f"Creating vector search index: {name}")
             index_name =vs_client.create_delta_sync_index(**index_config)
             return index_name
     except Exception as e:
@@ -183,7 +187,6 @@ def vector_similarity_search(index_name ,query_text, num_results=5):
         
         # Convert results to a DataFrame for display
         matches = results['result'].get("data_array", [])
-        print(matches)
         if matches:
             result_df = spark.createDataFrame(results['result']['data_array'], ["Date", "Content", "Similarity Score"])
             return result_df
@@ -195,5 +198,5 @@ def vector_similarity_search(index_name ,query_text, num_results=5):
         return None
 
 # Test with a sample query
-vector_similarity_search(index_name ,"delays in delivery to distribution center 2")
+vector_similarity_search(index_name ,"delays in delivery to distribution center 2").display()
 

@@ -3,24 +3,21 @@
 # MAGIC # Derive Raw Material Demand
 # MAGIC
 # MAGIC In this notebook, we process product demand forecasts to determine raw material requirements using a graph-based approach.
-
-
-# COMMAND ----------
-
-print(catalogName)
-print(dbName)
-
+# MAGIC
 
 # COMMAND ----------
 
 # MAGIC %pip install networkx --quiet
 # MAGIC %pip install graphframes --quiet
+# MAGIC %restart_python
 
 # COMMAND ----------
 
 # Create widgets for catalog and database names
 dbutils.widgets.text("catalog_name", "supply_chain", "Catalog Name")
 dbutils.widgets.text("db_name", "supply_chain_db", "Database Name")
+
+# COMMAND ----------
 
 # Get values from widgets
 catalog_name = dbutils.widgets.get("catalog_name")
@@ -33,6 +30,13 @@ print(f"Using database: {db_name}")
 # COMMAND ----------
 
 # MAGIC %run ./_resources/00-setup $reset_all_data=false $catalogName=$catalog_name $dbName=$db_name
+
+# COMMAND ----------
+
+print(catalogName)
+print(dbName)
+
+
 # COMMAND ----------
 
 import os
@@ -369,4 +373,5 @@ raw_material_supply_df = spark.read.table(f"{catalogName}.{dbName}.raw_material_
 raw_material_supply_df.display()
 
 # COMMAND ----------
+
 

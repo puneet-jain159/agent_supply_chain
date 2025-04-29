@@ -1,9 +1,4 @@
 # Databricks notebook source
-# MAGIC %md
-# MAGIC # No need to run this notebook
-
-# COMMAND ----------
-
 dbutils.widgets.dropdown("reset_all_data", "false", ["true", "false"], "Reset all data")
 dbutils.widgets.text("catalog_name", "hackathon_master", "Catalog Name")
 dbutils.widgets.text("db_name", "hackathon_master", "Database Name")

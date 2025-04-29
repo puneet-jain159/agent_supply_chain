@@ -16,12 +16,15 @@
 # MAGIC Key highlights for this notebook:
 # MAGIC - Use Databricks' collaborative and interactive notebook environment to find an appropriate time series model
 # MAGIC - Use Pandas UDFs (user-defined functions) to take your single-node data science code, and distribute it across multiple nodes
+
 # COMMAND ----------
 
 # Note: dbutils is automatically available in Databricks notebooks
 # Create widgets for catalog and database names
 dbutils.widgets.text("catalog_name", "supply_chain", "Catalog Name")
 dbutils.widgets.text("db_name", "supply_chain_db", "Database Name")
+
+# COMMAND ----------
 
 # Get values from widgets
 catalog_name = dbutils.widgets.get("catalog_name")
@@ -30,6 +33,7 @@ db_name = dbutils.widgets.get("db_name")
 # Display the values being used
 print(f"Using catalog: {catalog_name}")
 print(f"Using database: {db_name}")
+
 # COMMAND ----------
 
 # MAGIC %run ./_resources/00-setup $reset_all_data=false $catalogName=$catalog_name $dbName=$db_name
@@ -212,4 +216,5 @@ distribution_center_demand.write.mode("overwrite").saveAsTable(f"{catalogName}.{
 # MAGIC | pulp                                 | A python Linear Programming API      | https://github.com/coin-or/pulp/blob/master/LICENSE        | https://github.com/coin-or/pulp                      |
 
 # COMMAND ----------
+
 

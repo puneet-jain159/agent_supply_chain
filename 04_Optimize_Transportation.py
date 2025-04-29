@@ -42,6 +42,8 @@
 dbutils.widgets.text("catalog_name", "supply_chain", "Catalog Name")
 dbutils.widgets.text("db_name", "supply_chain_db", "Database Name")
 
+# COMMAND ----------
+
 # Get values from widgets
 catalog_name = dbutils.widgets.get("catalog_name")
 db_name = dbutils.widgets.get("db_name")
@@ -310,4 +312,5 @@ display(spark.sql(f"SELECT * FROM {catalogName}.{dbName}.shipment_recommendation
 # MAGIC | pulp                                 | A python Linear Programming API      | https://github.com/coin-or/pulp/blob/master/LICENSE        | https://github.com/coin-or/pulp                      |
 
 # COMMAND ----------
+
 

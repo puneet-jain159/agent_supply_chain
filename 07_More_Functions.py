@@ -1,7 +1,10 @@
-# Databricks notebook sourc
+# Databricks notebook source
 # Create widgets for catalog and database names
 dbutils.widgets.text("catalog_name", "supply_chain", "Catalog Name")
 dbutils.widgets.text("db_name", "supply_chain_db", "Database Name")
+
+# COMMAND ----------
+
 
 # Get values from widgets
 catalog_name = dbutils.widgets.get("catalog_name")
@@ -11,7 +14,7 @@ db_name = dbutils.widgets.get("db_name")
 # COMMAND ----------
 
 # MAGIC %run ./_resources/00-setup $reset_all_data=false $catalogName=$catalog_name $dbName=$db_name
-
+# MAGIC
 
 # COMMAND ----------
 
@@ -314,7 +317,7 @@ RETURN SELECT CONCAT(
 # MAGIC %sql
 # MAGIC SELECT string(collect_set(Content)) 
 # MAGIC FROM vector_search(index => "${catalog_name}.${db_name}.email_content_index", query => 'What are the delays with distribution center 5', num_results => 5);
-
+# MAGIC
 
 # COMMAND ----------
 
@@ -405,7 +408,4 @@ RETURN SELECT CONCAT(
 # COMMAND ----------
 
 # MAGIC %sql
-# MAGIC DESCRIBE users.lara_rachidi.product_demand_historical
-
-# COMMAND ----------
-
+# MAGIC DESCRIBE ${catalog_name}.${db_name}.product_demand_historical

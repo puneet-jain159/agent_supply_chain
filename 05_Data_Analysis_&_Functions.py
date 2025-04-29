@@ -1,5 +1,4 @@
 # Databricks notebook source
-# COMMAND ----------
 # MAGIC %md
 # MAGIC ## Supply Chain Data Analysis
 # MAGIC
@@ -17,6 +16,8 @@
 # Create widgets for catalog and database names
 dbutils.widgets.text("catalog_name", "supply_chain", "Catalog Name")
 dbutils.widgets.text("db_name", "supply_chain_db", "Database Name")
+
+# COMMAND ----------
 
 # Get values from widgets
 catalog_name = dbutils.widgets.get("catalog_name")
